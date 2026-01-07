@@ -13,7 +13,7 @@ export default {
     }
   },
 
-  // 1. On reconstruit la grille dynamiquement à partir des champs r1c1, r1c2...
+  // Création dynamique de la grille à partir des champs r1c1...r3c3
   computed: {
     grid() {
       if (!this.partie) return []
@@ -27,11 +27,12 @@ export default {
 
   beforeRouteEnter(to, from, next) {
     const id = to.params.id
+    // On charge la partie AVANT d'afficher la page
     api.get(`/api/games/${id}`)
       .then(({ data }) => {
         next(vm => {
           vm.partie = data
-          vm.initGame()
+          vm.initGame() // On lance la connexion WebSocket
         })
       })
       .catch(err => {
@@ -42,22 +43,29 @@ export default {
   },
 
   beforeUnmount() {
+    // On coupe la connexion quand on quitte la page
     if (this.websocket) this.websocket.close()
   },
 
   methods: {
     initGame() {
+      // 1. On récupère notre propre ID pour savoir qui on est
       api.get('/api/profile').then(response => {
         this.myUserId = response.data.id
+        // 2. Maintenant qu'on a l'ID, on ouvre le WebSocket
         this.connectWebSocket()
+      }).catch(err => {
+        console.error("Impossible de récupérer le profil", err)
       })
     },
 
     connectWebSocket() {
-      if (this.websocket) return
+      if (this.websocket) return // Déjà connecté
+
       this.websocket = new WebSocket('wss://morpion-api.edu.netlor.fr/websockets')
 
       this.websocket.onopen = () => {
+        console.log("Connecté au WebSocket !")
         this.websocket.send(JSON.stringify({
           action: 'connect',
           game_id: this.partie.id,
@@ -67,7 +75,9 @@ export default {
 
       this.websocket.onmessage = (event) => {
         const message = JSON.parse(event.data)
-        // L'API envoie parfois "state" ou "status" selon les implémentations, on recharge dans le doute
+        console.log("Message reçu :", message)
+
+        // Si l'adversaire joue ou rejoint, on recharge les données
         if (['opponent-join', 'opponent-play', 'opponent-quit'].includes(message.type)) {
           this.rechargerPartie()
         }
@@ -81,21 +91,22 @@ export default {
     },
 
     async play(rowIndex, colIndex) {
-      // rowIndex et colIndex vont de 0 à 2.
-      // Vu que les champs sont r1c1, r1c2..., l'API attend sûrement du 1 à 3.
-      // On ajoute +1 aux coordonnées.
+      // Règles du jeu :
+      // 1. La partie doit être en cours (state == 1)
+      // 2. C'est à mon tour
+      // 3. La case est vide
+      if (this.partie.state !== 1) return
+      if (this.partie.next_player_id !== this.myUserId) return
+      if (this.grid[rowIndex][colIndex] !== null) return
+
+      // Conversion des index (0,0) en format API (1,1)
+      // C'est ici que j'avais fait la faute de frappe "SX"
       const apiRow = rowIndex + 1
       const apiCol = colIndex + 1
 
-      // 2. Vérification avec 'state' (et non game_status)
-      if (this.partie.state !== 1) return
-      if (this.partie.next_player_id !== this.myUserId) return
-
-      // On vérifie si la case est vide dans notre grille calculée
-      if (this.grid[rowIndex][colIndex] !== null) return
-
       try {
         const response = await api.patch(`/api/games/${this.partie.id}/play/${apiRow}/${apiCol}`)
+        // Mise à jour immédiate sans attendre le websocket
         this.partie = response.data
       } catch (e) {
         if (e.response && e.response.data) {
@@ -106,13 +117,13 @@ export default {
 
     getCellContent(cellValue) {
       if (cellValue === null) return ''
-      // 3. Joueur 1 est dans 'owner'
-      const p1Id = this.partie.owner ? this.partie.owner.id : null
-      return cellValue === p1Id ? 'X' : 'O'
+
+      // LOGIQUE DES SIGNES CORRIGÉE :
+      // On utilise owner_id (qui est toujours là) au lieu de owner.id
+      return cellValue === this.partie.owner_id ? 'X' : 'O'
     },
 
     isMyTurn() {
-      // Utilisation de 'state' et 'next_player_id'
       return this.partie.state === 1 && this.partie.next_player_id === this.myUserId
     }
   }
@@ -137,16 +148,17 @@ export default {
 
         <div v-if="!partie.opponent" class="waiting">
           <p>En attente d’un adversaire…</p>
+          <div class="spinner"></div>
         </div>
 
         <div v-else>
           <div class="players">
-            <span :class="{ active: partie.next_player_id === partie.owner.id }">
-              {{ partie.owner.name }} (X)
+            <span :class="{ active: partie.next_player_id === partie.owner_id }">
+              {{ partie.owner ? partie.owner.name : 'Joueur 1' }} (X)
             </span>
             VS
-            <span :class="{ active: partie.next_player_id === partie.opponent.id }">
-              {{ partie.opponent.name }} (O)
+            <span :class="{ active: partie.next_player_id === partie.opponent_id }">
+              {{ partie.opponent ? partie.opponent.name : 'Joueur 2' }} (O)
             </span>
           </div>
 
@@ -165,7 +177,7 @@ export default {
             </router-link>
           </div>
 
-          <div v-if="partie.state === 1" class="grid">
+          <div v-if="partie.state !== 2" class="grid">
             <div v-for="(row, rIndex) in grid" :key="rIndex" class="row">
               <div
                 v-for="(cell, cIndex) in row"
@@ -195,7 +207,7 @@ export default {
 .players span.active { font-weight: bold; color: #42b983; text-decoration: underline; }
 .grid { display: inline-flex; flex-direction: column; border: 2px solid #333; margin-top: 20px; }
 .row { display: flex; }
-.cell { width: 80px; height: 80px; border: 1px solid #ccc; display: flex; align-items: center; justify-content: center; font-size: 2.5em; background-color: #fff; }
+.cell { width: 80px; height: 80px; border: 1px solid #ccc; display: flex; align-items: center; justify-content: center; font-size: 2.5em; background-color: #fff; cursor: default; }
 .cell.clickable { cursor: pointer; }
 .cell.clickable:hover { background-color: #e6f7ff; }
 .cell.taken { color: #555; background-color: #f9f9f9; }
@@ -203,4 +215,5 @@ export default {
 .win { color: green; font-weight: bold; }
 .lose { color: red; font-weight: bold; }
 .btn-home { margin-top: 15px; padding: 10px 20px; background-color: #333; color: white; border: none; cursor: pointer; }
+.waiting { margin-top: 20px; font-style: italic; color: #666; }
 </style>
