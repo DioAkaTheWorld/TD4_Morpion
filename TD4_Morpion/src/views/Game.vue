@@ -9,12 +9,13 @@ export default {
       partie: null,
       erreurs: [],
       websocket: null,
-      myUserId: null
+      myUserId: null,
+      gameOwnerId: null // VARIABLE IMPORTANTE : On stocke ici l'ID du créateur définitivement
     }
   },
 
-  // Création dynamique de la grille à partir des champs r1c1...r3c3
   computed: {
+    // Reconstruction de la grille (3x3) à partir des données plates (r1c1...)
     grid() {
       if (!this.partie) return []
       return [
@@ -27,45 +28,46 @@ export default {
 
   beforeRouteEnter(to, from, next) {
     const id = to.params.id
-    // On charge la partie AVANT d'afficher la page
-    api.get(`/api/games/${id}`)
+    // Ajout d'un timestamp pour éviter le cache dès le début
+    api.get(`/api/games/${id}?t=${Date.now()}`)
       .then(({ data }) => {
         next(vm => {
           vm.partie = data
-          vm.initGame() // On lance la connexion WebSocket
+          // On sauvegarde l'ID du créateur tout de suite !
+          // On regarde 'owner_id' ou 'owner.id' selon ce qui est dispo
+          vm.gameOwnerId = data.owner_id || (data.owner ? data.owner.id : null)
+
+          vm.initGame()
         })
       })
       .catch(err => {
         next(vm => {
-          vm.erreurs = err.response?.data || ['Erreur lors du chargement de la partie']
+          vm.erreurs = err.response?.data || ['Erreur chargement partie']
         })
       })
   },
 
   beforeUnmount() {
-    // On coupe la connexion quand on quitte la page
     if (this.websocket) this.websocket.close()
   },
 
   methods: {
     initGame() {
-      // 1. On récupère notre propre ID pour savoir qui on est
       api.get('/api/profile').then(response => {
         this.myUserId = response.data.id
-        // 2. Maintenant qu'on a l'ID, on ouvre le WebSocket
         this.connectWebSocket()
       }).catch(err => {
-        console.error("Impossible de récupérer le profil", err)
+        console.error("Erreur profil", err)
       })
     },
 
     connectWebSocket() {
-      if (this.websocket) return // Déjà connecté
+      if (this.websocket) return
 
       this.websocket = new WebSocket('wss://morpion-api.edu.netlor.fr/websockets')
 
       this.websocket.onopen = () => {
-        console.log("Connecté au WebSocket !")
+        console.log("WS Connecté")
         this.websocket.send(JSON.stringify({
           action: 'connect',
           game_id: this.partie.id,
@@ -75,9 +77,9 @@ export default {
 
       this.websocket.onmessage = (event) => {
         const message = JSON.parse(event.data)
-        console.log("Message reçu :", message)
+        console.log("WS Message:", message) // Regarde ta console (F12) si ça ne marche pas
 
-        // Si l'adversaire joue ou rejoint, on recharge les données
+        // Si n'importe quel événement de jeu arrive, on recharge
         if (['opponent-join', 'opponent-play', 'opponent-quit'].includes(message.type)) {
           this.rechargerPartie()
         }
@@ -85,42 +87,37 @@ export default {
     },
 
     rechargerPartie() {
-      api.get(`/api/games/${this.partie.id}`).then(({ data }) => {
+      // ASTUCE ANTI-CACHE : On ajoute Date.now() pour forcer une vraie requête au serveur
+      api.get(`/api/games/${this.partie.id}?t=${Date.now()}`).then(({ data }) => {
         this.partie = data
+        // Note: on ne touche PAS à gameOwnerId ici, pour garder la référence stable
       })
     },
 
     async play(rowIndex, colIndex) {
-      // Règles du jeu :
-      // 1. La partie doit être en cours (state == 1)
-      // 2. C'est à mon tour
-      // 3. La case est vide
       if (this.partie.state !== 1) return
       if (this.partie.next_player_id !== this.myUserId) return
       if (this.grid[rowIndex][colIndex] !== null) return
 
-      // Conversion des index (0,0) en format API (1,1)
-      // C'est ici que j'avais fait la faute de frappe "SX"
+      // +1 car l'API compte à partir de 1
       const apiRow = rowIndex + 1
       const apiCol = colIndex + 1
 
       try {
         const response = await api.patch(`/api/games/${this.partie.id}/play/${apiRow}/${apiCol}`)
-        // Mise à jour immédiate sans attendre le websocket
         this.partie = response.data
       } catch (e) {
-        if (e.response && e.response.data) {
-          alert("Erreur : " + JSON.stringify(e.response.data))
-        }
+        console.error(e)
+        if (e.response && e.response.data) alert("Erreur: " + JSON.stringify(e.response.data))
       }
     },
 
     getCellContent(cellValue) {
       if (cellValue === null) return ''
 
-      // LOGIQUE DES SIGNES CORRIGÉE :
-      // On utilise owner_id (qui est toujours là) au lieu de owner.id
-      return cellValue === this.partie.owner_id ? 'X' : 'O'
+      // LOGIQUE RÉPARÉE :
+      // On compare la valeur de la case avec notre variable stable gameOwnerId
+      return cellValue === this.gameOwnerId ? 'X' : 'O'
     },
 
     isMyTurn() {
@@ -148,16 +145,15 @@ export default {
 
         <div v-if="!partie.opponent" class="waiting">
           <p>En attente d’un adversaire…</p>
-          <div class="spinner"></div>
         </div>
 
         <div v-else>
           <div class="players">
-            <span :class="{ active: partie.next_player_id === partie.owner_id }">
+            <span :class="{ active: partie.next_player_id === gameOwnerId }">
               {{ partie.owner ? partie.owner.name : 'Joueur 1' }} (X)
             </span>
             VS
-            <span :class="{ active: partie.next_player_id === partie.opponent_id }">
+            <span :class="{ active: partie.next_player_id === partie.opponent.id }">
               {{ partie.opponent ? partie.opponent.name : 'Joueur 2' }} (O)
             </span>
           </div>
