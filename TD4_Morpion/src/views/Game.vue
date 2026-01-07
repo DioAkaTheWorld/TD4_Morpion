@@ -9,8 +9,7 @@ export default {
       partie: null,
       websocket: null,
       erreurs: [],
-      myUserId: null,
-      polling: false
+      myUserId: null
     }
   },
 
@@ -35,12 +34,11 @@ export default {
 
   async mounted() {
     await this.identifyUser()
-    await this.fetchGame(true)
-    this.startLongPolling()
+    await this.loadGame()
+    this.connectWebSocket()
   },
 
   beforeUnmount() {
-    this.polling = false
     if (this.websocket) this.websocket.close()
   },
 
@@ -50,20 +48,10 @@ export default {
       this.myUserId = data.id
     },
 
-    async fetchGame(initial = false) {
+    async loadGame() {
       const id = this.$route.params.id
       const { data } = await api.get(`/api/games/${id}`)
       this.partie = data
-
-      if (initial) this.connectWebSocket()
-    },
-
-    /* 🔥 LONG POLLING = CLÉ DU COURS 🔥 */
-    async startLongPolling() {
-      this.polling = true
-      while (this.polling) {
-        await this.fetchGame(false)
-      }
     },
 
     connectWebSocket() {
@@ -76,6 +64,13 @@ export default {
           player_id: this.myUserId
         }))
       }
+
+      this.websocket.onmessage = (event) => {
+        const msg = JSON.parse(event.data)
+        if (['opponent-join', 'opponent-play', 'opponent-quit'].includes(msg.type)) {
+          this.loadGame()
+        }
+      }
     },
 
     async play(row, col) {
@@ -85,9 +80,11 @@ export default {
       await api.patch(
         `/api/games/${this.partie.id}/play/${row + 1}/${col + 1}`
       )
+
+      // 🔥 LE POINT CLÉ
+      await this.loadGame()
     },
 
-    /* 🔥 LOGIQUE X / O CORRECTE 🔥 */
     getCellContent(cellValue) {
       if (cellValue === null) return ''
       if (cellValue === this.partie.owner.id) return 'X'
