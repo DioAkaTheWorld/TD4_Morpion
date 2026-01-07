@@ -12,7 +12,6 @@ export default {
     }
   },
 
-  // demandé par l’énoncé
   beforeRouteEnter(to, from, next) {
     api.get('/api/profile').then(({ data }) => {
       next(vm => {
@@ -45,13 +44,11 @@ export default {
 
     <h1>Mon profil</h1>
 
-    <!-- Message de succès -->
-    <p v-if="succes">
+    <p v-if="succes" style="color: green; font-weight: bold;">
       Profil enregistré avec succès.
     </p>
 
-    <!-- Messages d’erreur -->
-    <div v-if="erreurs.length">
+    <div v-if="erreurs.length" class="error-message">
       <p><strong>Erreurs :</strong></p>
       <ul>
         <li v-for="(e, i) in erreurs" :key="i">{{ e }}</li>
@@ -63,14 +60,14 @@ export default {
     </div>
 
     <form v-else @submit.prevent="enregistrer">
-      <div>
+      <div class="form-group">
         <label>
           Nom
           <input type="text" v-model="user.name" />
         </label>
       </div>
 
-      <div>
+      <div class="form-group">
         <label>
           Email
           <input type="email" v-model="user.email" />

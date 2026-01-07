@@ -11,7 +11,7 @@ export default {
       erreurs: [],
       myUserId: null,
       polling: false,
-      gameOwnerId: null // VARIABLE STABLE POUR LES SIGNES
+      gameOwnerId: null
     }
   },
 
@@ -150,29 +150,10 @@ export default {
 
         <div v-if="partie.state === 2">
           <p v-if="!partie.winner_id">Match nul</p>
-          <p v-else-if="partie.winner_id === myUserId">🎉 Gagné</p>
-          <p v-else>❌ Perdu</p>
+          <p v-else-if="partie.winner_id === myUserId" class="error-message" style="color: green;">🎉 Gagné</p>
+          <p v-else class="error-message">❌ Perdu</p>
         </div>
       </div>
     </div>
   </div>
 </template>
-
-<style scoped>
-.grid { display: inline-flex; flex-direction: column; border: 2px solid #333; }
-.row { display: flex; }
-.cell {
-  width: 80px;
-  height: 80px;
-  border: 1px solid #ccc;
-  font-size: 2.5em;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  background-color: white;
-  cursor: pointer;
-}
-.cell:hover {
-  background-color: #f0f0f0;
-}
-</style>
