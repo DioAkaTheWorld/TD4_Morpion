@@ -3,7 +3,6 @@ import api from '@/api'
 
 export default {
   name: 'Home',
-
   methods: {
     createGame() {
       api.post('/api/games')
@@ -19,20 +18,17 @@ export default {
 <template>
   <div>
     <h1>Page d’accueil</h1>
-
     <ul>
       <li>
         <router-link to="/profile">
           Mon profil
         </router-link>
       </li>
-
       <li>
         <button @click="createGame">
           Nouvelle partie
         </button>
       </li>
-
       <li>
         <router-link to="/join">
           Rejoindre une partie

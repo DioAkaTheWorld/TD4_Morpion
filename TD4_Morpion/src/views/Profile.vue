@@ -3,7 +3,6 @@ import api from '@/api'
 
 export default {
   name: 'Profile',
-
   data() {
     return {
       user: null,
@@ -11,7 +10,6 @@ export default {
       succes: false
     }
   },
-
   beforeRouteEnter(to, from, next) {
     api.get('/api/profile').then(({ data }) => {
       next(vm => {
@@ -19,7 +17,6 @@ export default {
       })
     })
   },
-
   methods: {
     enregistrer() {
       this.erreurs = []
@@ -41,9 +38,7 @@ export default {
 <template>
   <div>
     <router-link to="/home">← Retour à l’accueil</router-link>
-
     <h1>Mon profil</h1>
-
     <p v-if="succes" style="color: green; font-weight: bold;">
       Profil enregistré avec succès.
     </p>

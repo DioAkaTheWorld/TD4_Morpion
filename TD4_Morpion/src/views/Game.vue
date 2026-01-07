@@ -36,7 +36,6 @@ export default {
 
   async mounted() {
     await this.identifyUser()
-    // On charge la partie et on initialise les IDs fixes
     await this.fetchGame(true)
     this.startLongPolling()
   },
@@ -57,19 +56,15 @@ export default {
       const { data } = await api.get(`/api/games/${id}`)
       this.partie = data
 
-      // AU DÉBUT SEULEMENT : On sauvegarde qui est le créateur (X)
-      // On regarde data.owner.id OU data.owner_id pour être sûr de l'avoir
       if (initial) {
         this.gameOwnerId = data.owner ? data.owner.id : data.owner_id
         this.connectWebSocket()
       }
     },
 
-    /* 🔥 LONG POLLING SÉCURISÉ 🔥 */
     async startLongPolling() {
       this.polling = true
       while (this.polling) {
-        // On attend 1 seconde entre chaque appel pour ne pas tuer le navigateur
         await new Promise(resolve => setTimeout(resolve, 1000))
         if (!this.polling) break
         await this.fetchGame(false)
@@ -95,16 +90,11 @@ export default {
       await api.patch(
         `/api/games/${this.partie.id}/play/${row + 1}/${col + 1}`
       )
-      // Pas besoin de fetchGame ici, le polling le fera tout seul
     },
 
-    /* 🔥 LOGIQUE X / O RÉPARÉE 🔥 */
     getCellContent(cellValue) {
       if (cellValue === null) return ''
 
-      // On compare avec la variable stable gameOwnerId
-      // Si la valeur dans la case est l'ID du créateur => X
-      // Sinon (c'est l'adversaire) => O
       return cellValue === this.gameOwnerId ? 'X' : 'O'
     }
   }
@@ -150,8 +140,8 @@ export default {
 
         <div v-if="partie.state === 2">
           <p v-if="!partie.winner_id">Match nul</p>
-          <p v-else-if="partie.winner_id === myUserId" class="error-message" style="color: green;">🎉 Gagné</p>
-          <p v-else class="error-message">❌ Perdu</p>
+          <p v-else-if="partie.winner_id === myUserId" class="error-message" style="color: green;">BRAVO vous avez gagné</p>
+          <p v-else class="error-message">Dommage c'est perdu</p>
         </div>
       </div>
     </div>

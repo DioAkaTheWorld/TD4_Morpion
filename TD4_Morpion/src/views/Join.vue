@@ -42,12 +42,10 @@ export default {
         this.error = "Veuillez saisir un code.";
         return;
       }
-
       try {
         const response = await api.patch(`/api/games/${this.gameCode}/join`);
         const gameId = response.data.id;
         this.$router.push({ name: 'game', params: { id: gameId } });
-
       } catch (e) {
         console.error(e);
         if (e.response && e.response.data && e.response.data.message) {
