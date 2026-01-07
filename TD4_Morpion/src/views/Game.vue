@@ -10,7 +10,8 @@ export default {
       websocket: null,
       erreurs: [],
       myUserId: null,
-      polling: false
+      polling: false,
+      gameOwnerId: null // VARIABLE STABLE POUR LES SIGNES
     }
   },
 
@@ -35,6 +36,7 @@ export default {
 
   async mounted() {
     await this.identifyUser()
+    // On charge la partie et on initialise les IDs fixes
     await this.fetchGame(true)
     this.startLongPolling()
   },
@@ -55,13 +57,21 @@ export default {
       const { data } = await api.get(`/api/games/${id}`)
       this.partie = data
 
-      if (initial) this.connectWebSocket()
+      // AU DÉBUT SEULEMENT : On sauvegarde qui est le créateur (X)
+      // On regarde data.owner.id OU data.owner_id pour être sûr de l'avoir
+      if (initial) {
+        this.gameOwnerId = data.owner ? data.owner.id : data.owner_id
+        this.connectWebSocket()
+      }
     },
 
-    /* 🔥 LONG POLLING = CLÉ DU COURS 🔥 */
+    /* 🔥 LONG POLLING SÉCURISÉ 🔥 */
     async startLongPolling() {
       this.polling = true
       while (this.polling) {
+        // On attend 1 seconde entre chaque appel pour ne pas tuer le navigateur
+        await new Promise(resolve => setTimeout(resolve, 1000))
+        if (!this.polling) break
         await this.fetchGame(false)
       }
     },
@@ -85,14 +95,17 @@ export default {
       await api.patch(
         `/api/games/${this.partie.id}/play/${row + 1}/${col + 1}`
       )
+      // Pas besoin de fetchGame ici, le polling le fera tout seul
     },
 
-    /* 🔥 LOGIQUE X / O CORRECTE 🔥 */
+    /* 🔥 LOGIQUE X / O RÉPARÉE 🔥 */
     getCellContent(cellValue) {
       if (cellValue === null) return ''
-      if (cellValue === this.partie.owner.id) return 'X'
-      if (this.partie.opponent && cellValue === this.partie.opponent.id) return 'O'
-      return ''
+
+      // On compare avec la variable stable gameOwnerId
+      // Si la valeur dans la case est l'ID du créateur => X
+      // Sinon (c'est l'adversaire) => O
+      return cellValue === this.gameOwnerId ? 'X' : 'O'
     }
   }
 }
@@ -113,9 +126,9 @@ export default {
 
       <div v-else>
         <p>
-          {{ partie.owner.name }} (X)
+          {{ partie.owner ? partie.owner.name : 'Joueur 1' }} (X)
           VS
-          {{ partie.opponent.name }} (O)
+          {{ partie.opponent ? partie.opponent.name : 'Joueur 2' }} (O)
         </p>
 
         <p>
@@ -156,5 +169,10 @@ export default {
   display: flex;
   justify-content: center;
   align-items: center;
+  background-color: white;
+  cursor: pointer;
+}
+.cell:hover {
+  background-color: #f0f0f0;
 }
 </style>
