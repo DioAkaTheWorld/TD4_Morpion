@@ -13,6 +13,18 @@ export default {
     }
   },
 
+  // 1. On reconstruit la grille dynamiquement à partir des champs r1c1, r1c2...
+  computed: {
+    grid() {
+      if (!this.partie) return []
+      return [
+        [this.partie.r1c1, this.partie.r1c2, this.partie.r1c3],
+        [this.partie.r2c1, this.partie.r2c2, this.partie.r2c3],
+        [this.partie.r3c1, this.partie.r3c2, this.partie.r3c3]
+      ]
+    }
+  },
+
   beforeRouteEnter(to, from, next) {
     const id = to.params.id
     api.get(`/api/games/${id}`)
@@ -55,6 +67,7 @@ export default {
 
       this.websocket.onmessage = (event) => {
         const message = JSON.parse(event.data)
+        // L'API envoie parfois "state" ou "status" selon les implémentations, on recharge dans le doute
         if (['opponent-join', 'opponent-play', 'opponent-quit'].includes(message.type)) {
           this.rechargerPartie()
         }
@@ -68,13 +81,21 @@ export default {
     },
 
     async play(rowIndex, colIndex) {
-      // Vérification avec le statut numérique (1 = En cours)
-      if (this.partie.game_status !== 1) return
+      // rowIndex et colIndex vont de 0 à 2.
+      // Vu que les champs sont r1c1, r1c2..., l'API attend sûrement du 1 à 3.
+      // On ajoute +1 aux coordonnées.
+      const apiRow = rowIndex + 1
+      const apiCol = colIndex + 1
+
+      // 2. Vérification avec 'state' (et non game_status)
+      if (this.partie.state !== 1) return
       if (this.partie.next_player_id !== this.myUserId) return
-      if (this.partie.grid[rowIndex][colIndex] !== null) return
+
+      // On vérifie si la case est vide dans notre grille calculée
+      if (this.grid[rowIndex][colIndex] !== null) return
 
       try {
-        const response = await api.patch(`/api/games/${this.partie.id}/play/${rowIndex}/${colIndex}`)
+        const response = await api.patch(`/api/games/${this.partie.id}/play/${apiRow}/${apiCol}`)
         this.partie = response.data
       } catch (e) {
         if (e.response && e.response.data) {
@@ -85,14 +106,14 @@ export default {
 
     getCellContent(cellValue) {
       if (cellValue === null) return ''
-      // On sécurise l'accès à l'ID du joueur 1
-      const p1Id = this.partie.Player1 ? this.partie.Player1.id : (this.partie.player1 ? this.partie.player1.id : null)
-      cellValue === p1Id ? 'X' : 'O'
+      // 3. Joueur 1 est dans 'owner'
+      const p1Id = this.partie.owner ? this.partie.owner.id : null
+      return cellValue === p1Id ? 'X' : 'O'
     },
 
     isMyTurn() {
-      // Vérification : Partie en cours (1) ET c'est mon tour
-      return this.partie.game_status === 1 && this.partie.next_player_id === this.myUserId
+      // Utilisation de 'state' et 'next_player_id'
+      return this.partie.state === 1 && this.partie.next_player_id === this.myUserId
     }
   }
 }
@@ -120,8 +141,8 @@ export default {
 
         <div v-else>
           <div class="players">
-            <span :class="{ active: partie.next_player_id === (partie.Player1?.id || partie.player1?.id) }">
-              {{ partie.Player1?.name || 'Joueur 1' }} (X)
+            <span :class="{ active: partie.next_player_id === partie.owner.id }">
+              {{ partie.owner.name }} (X)
             </span>
             VS
             <span :class="{ active: partie.next_player_id === partie.opponent.id }">
@@ -129,11 +150,11 @@ export default {
             </span>
           </div>
 
-          <h3 v-if="partie.game_status === 1">
+          <h3 v-if="partie.state === 1">
             {{ isMyTurn() ? "C'est à vous !" : "Au tour de l'adversaire..." }}
           </h3>
 
-          <div v-if="partie.game_status === 2" class="result-box">
+          <div v-if="partie.state === 2" class="result-box">
             <h2>Partie Terminée !</h2>
             <p v-if="!partie.winner_id">Match Nul ! 🤝</p>
             <p v-else-if="partie.winner_id === myUserId" class="win">🎉 VOUS AVEZ GAGNÉ ! 🎉</p>
@@ -144,8 +165,8 @@ export default {
             </router-link>
           </div>
 
-          <div v-if="partie.game_status === 1" class="grid">
-            <div v-for="(row, rIndex) in partie.grid" :key="rIndex" class="row">
+          <div v-if="partie.state === 1" class="grid">
+            <div v-for="(row, rIndex) in grid" :key="rIndex" class="row">
               <div
                 v-for="(cell, cIndex) in row"
                 :key="cIndex"
@@ -168,7 +189,6 @@ export default {
 </template>
 
 <style scoped>
-/* Le CSS reste identique */
 .game-view { max-width: 600px; margin: 0 auto; text-align: center; }
 .code { font-family: monospace; font-weight: bold; background: #eee; padding: 2px 6px; }
 .players { display: flex; justify-content: space-around; margin: 20px 0; font-size: 1.1em; }
