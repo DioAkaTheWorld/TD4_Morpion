@@ -6,16 +6,16 @@ export default {
 
   data() {
     return {
-      partie: null,
+      partie: null,      // L'objet partie qui change à chaque coup
       erreurs: [],
       websocket: null,
-      myUserId: null,
-      gameOwnerId: null // VARIABLE IMPORTANTE : On stocke ici l'ID du créateur définitivement
+      myUserId: null,    // Mon ID
+      gameOwnerId: null  // L'ID du créateur (Joueur 1 = X), stocké une bonne fois pour toutes
     }
   },
 
   computed: {
-    // Reconstruction de la grille (3x3) à partir des données plates (r1c1...)
+    // On transforme les données "plates" de l'API (r1c1...) en tableau 2D pour l'affichage
     grid() {
       if (!this.partie) return []
       return [
@@ -26,25 +26,9 @@ export default {
     }
   },
 
-  beforeRouteEnter(to, from, next) {
-    const id = to.params.id
-    // Ajout d'un timestamp pour éviter le cache dès le début
-    api.get(`/api/games/${id}?t=${Date.now()}`)
-      .then(({ data }) => {
-        next(vm => {
-          vm.partie = data
-          // On sauvegarde l'ID du créateur tout de suite !
-          // On regarde 'owner_id' ou 'owner.id' selon ce qui est dispo
-          vm.gameOwnerId = data.owner_id || (data.owner ? data.owner.id : null)
-
-          vm.initGame()
-        })
-      })
-      .catch(err => {
-        next(vm => {
-          vm.erreurs = err.response?.data || ['Erreur chargement partie']
-        })
-      })
+  mounted() {
+    // 1. Au chargement de la page, on récupère la partie
+    this.loadGameData(true)
   },
 
   beforeUnmount() {
@@ -52,22 +36,47 @@ export default {
   },
 
   methods: {
-    initGame() {
+    // Charge les données de la partie
+    loadGameData(isInitialLoad = false) {
+      const id = this.$route.params.id
+      // Le paramètre t=Date.now() force le navigateur à ne pas utiliser le cache
+      api.get(`/api/games/${id}?t=${Date.now()}`)
+        .then(({ data }) => {
+          this.partie = data
+
+          // Si c'est le tout premier chargement, on sauvegarde QUI est le joueur 1 (X)
+          if (isInitialLoad) {
+            // On cherche l'ID partout où il peut être (owner_id ou owner.id)
+            this.gameOwnerId = data.owner_id || (data.owner ? data.owner.id : null)
+            console.log("Joueur 1 (X) ID fixé à :", this.gameOwnerId)
+
+            // Et on lance l'identification utilisateur + websocket
+            this.identifyUser()
+          }
+        })
+        .catch(err => {
+          console.error(err)
+          this.erreurs = err.response?.data || ['Erreur de chargement']
+        })
+    },
+
+    // Récupère mon propre ID
+    identifyUser() {
       api.get('/api/profile').then(response => {
         this.myUserId = response.data.id
+        console.log("Je suis :", this.myUserId)
         this.connectWebSocket()
-      }).catch(err => {
-        console.error("Erreur profil", err)
       })
     },
 
+    // Connexion au temps réel
     connectWebSocket() {
       if (this.websocket) return
 
       this.websocket = new WebSocket('wss://morpion-api.edu.netlor.fr/websockets')
 
       this.websocket.onopen = () => {
-        console.log("WS Connecté")
+        console.log("WebSocket connecté !")
         this.websocket.send(JSON.stringify({
           action: 'connect',
           game_id: this.partie.id,
@@ -77,46 +86,39 @@ export default {
 
       this.websocket.onmessage = (event) => {
         const message = JSON.parse(event.data)
-        console.log("WS Message:", message) // Regarde ta console (F12) si ça ne marche pas
+        console.log("Notification reçue :", message)
 
-        // Si n'importe quel événement de jeu arrive, on recharge
+        // Si quelqu'un joue, rejoint ou quitte, on recharge la partie
         if (['opponent-join', 'opponent-play', 'opponent-quit'].includes(message.type)) {
-          this.rechargerPartie()
+          this.loadGameData(false) // false car ce n'est pas le chargement initial
         }
       }
     },
 
-    rechargerPartie() {
-      // ASTUCE ANTI-CACHE : On ajoute Date.now() pour forcer une vraie requête au serveur
-      api.get(`/api/games/${this.partie.id}?t=${Date.now()}`).then(({ data }) => {
-        this.partie = data
-        // Note: on ne touche PAS à gameOwnerId ici, pour garder la référence stable
-      })
-    },
-
+    // Action de jouer
     async play(rowIndex, colIndex) {
-      if (this.partie.state !== 1) return
-      if (this.partie.next_player_id !== this.myUserId) return
-      if (this.grid[rowIndex][colIndex] !== null) return
+      if (this.partie.state !== 1) return // Pas en cours
+      if (this.partie.next_player_id !== this.myUserId) return // Pas mon tour
+      if (this.grid[rowIndex][colIndex] !== null) return // Case prise
 
-      // +1 car l'API compte à partir de 1
+      // L'API compte les lignes/colonnes à partir de 1
       const apiRow = rowIndex + 1
       const apiCol = colIndex + 1
 
       try {
         const response = await api.patch(`/api/games/${this.partie.id}/play/${apiRow}/${apiCol}`)
+        // On met à jour la partie immédiatement
         this.partie = response.data
       } catch (e) {
-        console.error(e)
-        if (e.response && e.response.data) alert("Erreur: " + JSON.stringify(e.response.data))
+        if (e.response && e.response.data) alert("Erreur : " + JSON.stringify(e.response.data))
       }
     },
 
+    // Détermine si on affiche X ou O
     getCellContent(cellValue) {
       if (cellValue === null) return ''
-
-      // LOGIQUE RÉPARÉE :
-      // On compare la valeur de la case avec notre variable stable gameOwnerId
+      // Si l'ID dans la case est celui du gameOwnerId sauvegardé au début => X
+      // Sinon => O
       return cellValue === this.gameOwnerId ? 'X' : 'O'
     },
 
@@ -150,11 +152,11 @@ export default {
         <div v-else>
           <div class="players">
             <span :class="{ active: partie.next_player_id === gameOwnerId }">
-              {{ partie.owner ? partie.owner.name : 'Joueur 1' }} (X)
+              {{ (partie.owner && partie.owner.name) ? partie.owner.name : 'Joueur 1' }} (X)
             </span>
             VS
             <span :class="{ active: partie.next_player_id === partie.opponent.id }">
-              {{ partie.opponent ? partie.opponent.name : 'Joueur 2' }} (O)
+              {{ (partie.opponent && partie.opponent.name) ? partie.opponent.name : 'Joueur 2' }} (O)
             </span>
           </div>
 
