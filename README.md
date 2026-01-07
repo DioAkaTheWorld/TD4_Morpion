@@ -37,8 +37,8 @@ http://localhost:5173
 - Chaque joueur doit utiliser une **clé API différente**
 Pour cela on a créé des fichiers nommé .env.local avec notre propre clé api à l'interieur
 
-contenue du fichier .env.local :
+- Contenu du fichier .env.local :
 VITE_API_KEY=clé_api
 
 ## Problèmes
-- Affichage du jeu, le jeu fonctionne mais les 2 joueurs joue avec le symbole O.
+- Affichage du jeu, le jeu fonctionne mais les 2 joueurs jouent avec le symbole O.
