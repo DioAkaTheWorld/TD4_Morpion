@@ -10,12 +10,11 @@ export default {
       erreurs: [],
       websocket: null,
       myUserId: null,
-      gameOwnerId: null // Joueur 1 = X (SOURCE UNIQUE)
+      gameOwnerId: null // ID du créateur = X (SOURCE UNIQUE)
     }
   },
 
   computed: {
-    // Grille 3x3 depuis les champs r1c1...r3c3
     grid() {
       if (!this.partie) return []
       return [
@@ -31,38 +30,45 @@ export default {
   },
 
   beforeUnmount() {
-    if (this.websocket) this.websocket.close()
+    if (this.websocket) {
+      this.websocket.close()
+      this.websocket = null
+    }
   },
 
   methods: {
-    // 1) Charger la partie
-    loadGameData(isInitialLoad = false) {
-      const id = this.$route.params.id
-      api.get(`/api/games/${id}?t=${Date.now()}`)
-        .then(({ data }) => {
-          this.partie = data
+    /* =======================
+       CHARGEMENT DE LA PARTIE
+       ======================= */
+    async loadGameData(isInitialLoad = false) {
+      try {
+        const id = this.$route.params.id
+        const { data } = await api.get(`/api/games/${id}?t=${Date.now()}`)
+        this.partie = data
 
-          // IMPORTANT : source UNIQUE pour X
-          if (isInitialLoad) {
-            this.gameOwnerId = data.owner.id
-            this.identifyUser()
-          }
-        })
-        .catch(err => {
-          console.error(err)
-          this.erreurs = err.response?.data || ['Erreur de chargement']
-        })
+        // SOURCE UNIQUE ET STABLE POUR X
+        if (isInitialLoad) {
+          this.gameOwnerId = data.owner.id
+          await this.identifyUser()
+        }
+      } catch (e) {
+        console.error(e)
+        this.erreurs = ['Erreur de chargement de la partie']
+      }
     },
 
-    // 2) Identifier l’utilisateur courant
-    identifyUser() {
-      api.get('/api/profile').then(({ data }) => {
-        this.myUserId = data.id
-        this.connectWebSocket()
-      })
+    /* =======================
+       IDENTIFICATION UTILISATEUR
+       ======================= */
+    async identifyUser() {
+      const { data } = await api.get('/api/profile')
+      this.myUserId = data.id
+      this.connectWebSocket()
     },
 
-    // 3) WebSocket
+    /* =======================
+       WEBSOCKET (SYNCHRO)
+       ======================= */
     connectWebSocket() {
       if (this.websocket) return
 
@@ -76,15 +82,18 @@ export default {
         }))
       }
 
-      this.websocket.onmessage = (event) => {
+      this.websocket.onmessage = async (event) => {
         const msg = JSON.parse(event.data)
+
         if (['opponent-join', 'opponent-play', 'opponent-quit'].includes(msg.type)) {
-          this.loadGameData(false)
+          await this.loadGameData(false)
         }
       }
     },
 
-    // 4) Jouer une case
+    /* =======================
+       JOUER UN COUP
+       ======================= */
     async play(rowIndex, colIndex) {
       if (this.partie.state !== 1) return
       if (this.partie.next_player_id !== this.myUserId) return
@@ -94,23 +103,27 @@ export default {
       const apiCol = colIndex + 1
 
       try {
-        const { data } = await api.patch(
-          `/api/games/${this.partie.id}/play/${apiRow}/${apiCol}`
-        )
-        this.partie = data
+        // PATCH = action uniquement
+        await api.patch(`/api/games/${this.partie.id}/play/${apiRow}/${apiCol}`)
+
+        // GET = vérité (OBLIGATOIRE)
+        await this.loadGameData(false)
       } catch (e) {
-        alert('Erreur : ' + JSON.stringify(e.response?.data || e))
+        alert('Erreur lors du coup')
       }
     },
 
-    // 5) Contenu cellule (FIX X/O)
+    /* =======================
+       AFFICHAGE X / O (FIX)
+       ======================= */
     getCellContent(cellValue) {
       if (cellValue === null) return ''
       return cellValue === this.gameOwnerId ? 'X' : 'O'
     },
 
     isMyTurn() {
-      return this.partie.state === 1 && this.partie.next_player_id === this.myUserId
+      return this.partie.state === 1 &&
+             this.partie.next_player_id === this.myUserId
     }
   }
 }
@@ -123,15 +136,13 @@ export default {
     <h1>Morpion</h1>
 
     <div v-if="erreurs.length">
-      <ul>
-        <li v-for="(e, i) in erreurs" :key="i">{{ e }}</li>
-      </ul>
+      <p v-for="(e, i) in erreurs" :key="i">{{ e }}</p>
     </div>
 
     <div v-if="!partie">Chargement...</div>
 
     <div v-else>
-      <p><strong>Code partie :</strong> {{ partie.code }}</p>
+      <p><strong>Code :</strong> {{ partie.code }}</p>
 
       <div v-if="!partie.opponent">
         <p>En attente d’un adversaire…</p>
@@ -139,9 +150,9 @@ export default {
 
       <div v-else>
         <p>
-          <strong>{{ partie.owner.name }}</strong> (X)
+          {{ partie.owner.name }} (X)
           VS
-          <strong>{{ partie.opponent.name }}</strong> (O)
+          {{ partie.opponent.name }} (O)
         </p>
 
         <p v-if="partie.state === 1">
@@ -152,10 +163,6 @@ export default {
           <p v-if="!partie.winner_id">Match nul</p>
           <p v-else-if="partie.winner_id === myUserId">🎉 Vous avez gagné</p>
           <p v-else>❌ Vous avez perdu</p>
-
-          <router-link to="/home">
-            <button>Retour à l'accueil</button>
-          </router-link>
         </div>
 
         <div v-if="partie.state !== 2" class="grid">
@@ -177,13 +184,17 @@ export default {
 </template>
 
 <style scoped>
-.game-view { max-width: 600px; margin: 0 auto; text-align: center; }
+.game-view { max-width: 600px; margin: auto; text-align: center; }
 .grid { display: inline-flex; flex-direction: column; border: 2px solid #333; margin-top: 20px; }
 .row { display: flex; }
 .cell {
-  width: 80px; height: 80px; border: 1px solid #ccc;
-  display: flex; align-items: center; justify-content: center;
+  width: 80px;
+  height: 80px;
+  border: 1px solid #ccc;
   font-size: 2.5em;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .cell.clickable { cursor: pointer; }
 </style>
